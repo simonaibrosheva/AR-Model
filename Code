@@ -1,33 +1,36 @@
 # Import the needed libraries
-
+import keras
 import numpy as np
 import pandas as pd
 import pycountry
 import plotly.express as px
+import plotly.figure_factory as ff
 import plotly.graph_objects as go
+from keras import Sequential
+from keras.src.layers import Dense, Dropout, BatchNormalization, LeakyReLU
+from sklearn.model_selection import GridSearchCV
+from sklearn.tree import _tree
+from keras.src.optimizers import Adam
+# from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import IsolationForest, GradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
+# from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
+# from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from sklearn.ensemble import ExtraTreesClassifier
+from scikeras.wrappers import KerasClassifier
+# from sklearn.ensemble import ExtraTreesClassifier
 from catboost import CatBoostClassifier
-from sklearn.metrics import roc_curve, auc, classification_report
-# from yellowbrick.cluster import KElbowVisualizer, SilhouetteVisualizer
-# from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
-# from sklearn.cluster import KMeans
-# from sklearn.decomposition import PCA
+from sklearn.metrics import roc_curve, auc, classification_report, confusion_matrix, accuracy_score
 
 # 1. Loading the Data
 
 # Load the data from a CSV file
 paid_invoices = pd.read_csv(r'C:\Users\ibrossi\Desktop\Project\Data\Paid invoices.csv')
-# paid_invoices = pd.read_csv(r'C:\Users\ibrossi\Desktop\Project\Data\Paid invoices 2024 only.csv')
 payment_terms = pd.read_csv(r'C:\Users\ibrossi\Desktop\Project\Data\Payment terms.csv')
 
 # Display the first few rows of the dataframes
@@ -36,190 +39,35 @@ payment_terms.head(10)
 
 # Merge the two tables and take only the days_from_baseline_date_max column
 payment_terms.rename(columns={'payment_terms_ZTERM': 'PayT_Code'}, inplace=True)
-invoices = paid_invoices.merge(payment_terms[['PayT_Code', 'days_from_baseline_date_max']], on='PayT_Code', how='inner')
+invoices = paid_invoices.merge(payment_terms[['PayT_Code', 'days_from_baseline_date_max']], on='PayT_Code', how='left')
 invoices.rename(columns={'days_from_baseline_date_max': 'Payment_Terms_Days'}, inplace=True)
 
 # 2. Initial Data Analysis
 # 2.1. Dataset Overview
 
 # Print the dimensions of the dataframes, showing the number of rows and columns.
-print(invoices.shape)  # 816001 rows, 35 columns
+print(invoices.shape)  # 836864 rows, 35 columns
 
 # Check data types and names for each column
 invoices.info()
 print(invoices.columns)
-
-# Company_Code: Unique identifier for the company which issued the invoice.
-# Payer_Code: Unique code representing the payer corresponding to a specific customer in the database.
-# Accounting_Document: Integer representing a unique accounting document number representing an invoice.
-# Document_Date: Date when the invoice was issued
-# Posting_Date: Date when the transaction was officially recorded in the accounting system
-# Amount_GC: The invoice amount in the group currency.
-# Group_Currency: The group currency in which the transaction amount is denominated - EUR.
-# Clearing_Date: Date when the invoice was cleared against its payment.
-# DueDate: Date by which the payment was expected, formatted as a string.
-# PayT_Code: Code representing the payment terms.
-# Timeliness: Integer value calculating the days difference between clearing and due dates indicating whether the payment was received before the due date (- number), on the due date (0), after the due date (+ number).
-# Timeliness_Description: Aging buckets of the timeliness category (e.g., 'Before DueDate', 'Due 1-7 days').
-# Unique_Key: Unique identifier for each invoice, combining company code, fiscal year and accounting document for distinct records.
-# DunningBlock_MANSP: String indicating if the account is blocked for dunning (reminders for overdue payments).
-# LastDunning_Level: The last dunning level reached, represented as a floating-point number.
-# LastDunning_RunDate: The date of the last dunning run, formatted as a string.
-# Overdue_Flag: Flag indicating whether the payment is overdue (e.g., "Overdue" or "Not Overdue").
-# Dunning_Flag: Flag indicating whether the account is under the dunning process (e.g., "Yes" or "No").
-# Comment_Created_On: Date when the comment related to the invoice was created.
-# Customer_Contact_Type_description: Description of the type of contact made with the customer (e.g., "Email," "Phone Call").
-# Customer_Contact_Result_description: Description of the result of the customer contact (e.g., "Payment Promised").
-# Comment: Notes or remarks related to the invoice.
-# Comment_Flag: Indicator of whether a comment exists for the transaction.
-# Effect_Flag: Indicator of whether a specific event or action had a desired effect???
-# AccountChannel_KATR2: Code representing the sales or account channel through which the transaction occurred.
-# AccountChannel_Description: Description of the sales or account channel (e.g., "End User," "Dealer").
-# Country_LAND1: Country code where the payer is located.
-# Dispute_Category_Description: Description of the category of dispute, if any (e.g., "Administration").
-# Dispute_Reason_Description: Description of the reason for the dispute.
-# DisputeStatus: Status of any dispute related to the transaction (e.g., "Open," "Resolved").
-# State_Description: Description of whether the customer kept the promise of paying the invoice.
-# Credit_Limit: The credit limit assigned to the customer.
-# Interest_Flag: Indicator of whether interest is applied.
-# Interest_Rate: The rate of interest applied, represented as a floating-point number.
-#Payment_Terms_Days: Column representing the payment terms in days.
 
 # 2.2. Summary Statistics
 
 # Summary statistics for numerical variables
 check = invoices.describe().T
 
-# Inferences:
-# 1. Amount_GC:
-# The average transaction amount is approximately 4,297.
-# The minimum value is highly negative (-4,373,727.48), suggesting possible refunds or adjustments.
-# The maximum amount is 4,105,682.29, with a median of 413.49, indicating most amounts are smaller but there are high-value outliers.
-# A substantial standard deviation (23,983) reflects variability in invoice amounts.
-
-# 2.Timeliness:
-# The average timeliness score is 13.73, with a range from -3,288 (very early) to 4,142 (very late or exceptional cases).
-# The median is 0, indicating most transactions are on time.
-# The large standard deviation (91.83) and wide range suggest varied payment behaviors.
-
-# 3.Credit_Limit:
-# The average credit limit is approximately 6,218,454.
-# The range spans from 0 to 30,000,000, indicating diverse customer credit capacities.
-# The large standard deviation highlights significant variation in credit limits.
-
-# 4.Interest_Rate:
-# The average interest rate is 0.12108, with values ranging from 0.0925 to 0.1450.
-# The standard deviation is minimal (0.02288), indicating low variability among the few entries recorded.
-
-
 # Summary statistics for categorical variables
 check2 = invoices.describe(include='object').T
 
-# Inferences
-# 1.Company_Code:
-# Contains 24 unique company codes.
-# The most frequent company code is "CUSA" with 295,382 occurrences.
-
-# 2.Document_Date:
-# Contains 1,925 unique document dates.
-# The most frequent date is "2023-10-31," with 2,480 occurrences.
-
-# 3.Posting_Date:
-# Contains 1,795 unique dates.
-# The most frequent date is "2024-05-01" with 14,796 occurrences.
-
-# 4.Group_Currency:
-# Only one unique value ("EUR").
-# Indicates all transactions are processed in the same currency.
-
-# 5.Clearing_Date:
-# Contains 727 unique dates.
-# The most frequent clearing date is "2024-05-01" with 14,812 occurrences.
-
-# 6.DueDate:
-# Contains 2,124 unique due dates.
-# The most frequent due date is "2023-11-30," with 7,243 occurrences.
-
-# 7.PayT_Code:
-# Contains 115 unique payment codes.
-# The most frequent code is "030N" with 403,290 occurrences.
-
-# 8.Timeliness_Description:
-# Contains 5 unique categories.
-# The most frequent category is "Before DueDate" with 328,184 occurrences.
-
-# 9.Unique_Key:
-# Contains 828,694 unique values.
-# The most frequent key appears 4 times, indicating a possibility of duplicates in the dataframe
-
-# 10.DunningBlock_MANSP:
-# Contains 6 unique values.
-# The most frequent value is "D," appearing 15,395 times.
-
-# 11.LastDunning_RunDate:
-# Contains 247 unique dates.
-# The most frequent date is "2024-07-28," with 1,790 occurrences.
-
-# 12.Overdue_Flag:
-# Contains 2 unique values ("Not Overdue" and "Overdue").
-# The most frequent value is "Not Overdue" with 426,934 occurrences.
-
-# 13.Dunning_Flag:
-# Contains 2 unique values ("Yes" and "No").
-# The most frequent value is "No" with 719,305 occurrences.
-
-# 14.Comment_Created_On:
-# Contains 677 unique dates.
-# The most frequent date is "2024-05-02," with 4,246 occurrences.
-
-# 15.Customer_Contact_Type_description:
-# Contains 4 unique types.
-# The most frequent type is "Email," with 384,00 occurrences.
-
-# 16.Customer_Contact_Result_description:
-# Contains 7 unique types.
-# The most frequent type is "Email," with 303,564 occurrences.
-
-# 17.Comment:
-# Contains 42,759 unique comments.
-# The most frequent comment timestamp is "02/02/2023 08:29:29," with 2,564 occurrences.
-# Highlights frequently repeated comments or templates.
-
-# 18.AccountChannel_Description:
-# Contains 7 unique values.
-# The most frequent value is "End User" with 367,981 occurrences.
-
-# 19.Country_LAND1:
-# Contains 114 unique country codes.
-# The most frequent code is "US" with 295,791 occurrences.
-
-# 19.Dispute_Category_Description:
-# Contains 3 unique categories.
-# The most frequent category is "Administration" with 5,953 occurrences.
-
-# 20.Dispute_Reason_Description:
-# Contains 37 unique reasons.
-# The most frequent reason is "Invoice not Received" with 2,781 occurrences.
-
-# 21.DisputeStatus:
-# Contains 2 unique statuses.
-# The most frequent status is "Closed," with 8,101 occurrences.
-
-# 22.State_Description:
-# Contains 6 unique states.
-# The most frequent state is "Kept" with 61,053 occurrences.
-
-# 23.Interest_Flag:
-# Contains 1 unique value ("True").
-# Indicates a uniform flag for interest-related entries.
-
 # 3. Data Cleaning & Transformation
 # 3.1. Handling Missing Values
-invoices.isnull().sum()
+missing_values = invoices.isnull().sum()
 
 # 1. PayT_Code - 20863 missing values
-# 5,283 documents issued to payers with code starting with '3' which are cash customers so for all of these documents the payment term will be replaced with 'Cash payment'
-invoices.loc[invoices['PayT_Code'].isna() & invoices['Payer_Code'].astype(str).str.startswith('3'), 'PayT_Code'] = 'Cash'
+# 5,283 documents issued to payers with code starting with '3' which are cash customers so for all of these documents the payment term will be replaced with code CADS, which represents cash payments
+invoices.loc[invoices['PayT_Code'].isna() & invoices['Payer_Code'].astype(str).str.startswith('3'), 'Payment_Terms_Days'] = 0
+invoices.loc[invoices['PayT_Code'].isna() & invoices['Payer_Code'].astype(str).str.startswith('3'), 'PayT_Code'] = 'CADS'
 
 # the rest 15580 documents will be removed for the dataframe as this variable is important
 invoices = invoices[invoices['PayT_Code'].notna()]
@@ -266,7 +114,7 @@ invoices = invoices.drop(columns=['DisputeStatus'])
 # 14. State_Description - 750506 missing values - these entries will be replaced with "Not Contacted", which later will be used to encode the column accordingly.
 invoices['State_Description'] = invoices['State_Description'].fillna('Not Contacted')
 
-# 15. Country_LAND1 - 65 missing values - these documents will be removed for the dataframe
+# 15. Credit_Limit - 65 missing values - these documents will be removed for the dataframe
 invoices = invoices[invoices['Credit_Limit'].notna()]
 
 # 17. Interest_Flag - 784147 missing values - these entries will be replaced with "No Interest Charged", which later will be used to encode the column accordingly.
@@ -341,6 +189,36 @@ invoices_cleaned = invoices_cleaned[~(invoices_cleaned['Amount_GC'] <= 0)]
 # Reset the index
 invoices_cleaned = invoices_cleaned.reset_index(drop=True)
 
+# 3.5. Treating documents with Posting date after Due Date
+
+# Filter the dataframe to include only rows the Posting Date is bigger that the Due Date
+problematic_invoices = invoices_cleaned[(invoices_cleaned['Posting_Date'] > invoices_cleaned['DueDate'])]
+
+# Finding the percentage of these invoices -
+print(f"The percentage of invoices with Due Date before Posting Date in the dataset is:"
+      f" {(problematic_invoices.shape[0] / invoices_cleaned.shape[0]) * 100:.2f}%")
+
+# These documents will be removed from the dataframe as never can be paid on time and most probably they have been transferd from another system/company code
+invoices_cleaned = invoices_cleaned[~(invoices_cleaned['Posting_Date'] > invoices_cleaned['DueDate'])]
+
+# Reset the index
+invoices_cleaned = invoices_cleaned.reset_index(drop=True)
+
+# 3.6. Treating documents with payment in advance (PADV payment terms code)
+
+# Filter the dataframe to include only rows where payment term is PADV
+padv_invoices = invoices_cleaned[(invoices_cleaned['PayT_Code'] == 'PADV')]
+
+# Finding the percentage of paid in advance invoices
+print(f"The percentage of invoices with PADV payment terms in the dataset is:"
+      f" {(padv_invoices.shape[0] / invoices_cleaned.shape[0]) * 100:.2f}%")
+
+# These documents will be removed from the dataframe as they should be paid in advance
+invoices_cleaned = invoices_cleaned[~(invoices_cleaned['PayT_Code'] == 'PADV')]
+
+# Reset the index
+invoices_cleaned = invoices_cleaned.reset_index(drop=True)
+
 # 4. Visual exploration of the data
 # 4.1. Investigating Timeliness_Description Column
 
@@ -370,19 +248,84 @@ fig = px.bar(
 )
 fig.show()
 
+# Timeliness Category by Invoice Amount
+# Sum Amount_GC for each Timeliness_Description category
+timeliness_amounts = invoices_cleaned.groupby('Timeliness_Description')['Amount_GC'].sum()
+
+# Convert amounts to millions
+timeliness_amounts = (timeliness_amounts / 1000000).reindex(category_order, fill_value=0)  # Ensure correct order
+
+# Define color scale: Green for early, Yellow for on time, Red for late
+colors = ['#2ecc71', '#27ae60', '#f1c40f', '#e67e22', '#e74c3c']
+
+# Plot the bar chart (showing Amount_GC in Millions)
+fig = px.bar(
+    x=timeliness_amounts.index,
+    y=timeliness_amounts.values,
+    labels={'x': 'Timeliness Category', 'y': 'Total Invoice Amount (Millions)'},
+    title='Payment Timeliness Categories (By Amount in Millions)',
+    color=timeliness_amounts.index,
+    color_discrete_sequence=colors,
+    text=timeliness_amounts.values  # Ensure correct text is assigned
+)
+
+# Fix text display issue and format numbers in millions
+fig.update_traces(texttemplate='%{text:.2f}M', textposition='outside')
+
+fig.update_layout(
+    xaxis_title='Timeliness Category',
+    yaxis_title='Total Invoice Amount (Millions)'
+)
+
+fig.show()
+
 # 4.2. Investigating Overdue_Flag Column
 
 # Calculate the value counts and reindex to ensure the correct order
 overdue_counts = invoices_cleaned['Overdue_Flag'].value_counts()
 
+# Compute percentages
+total_count = overdue_counts.sum()
+percentages = (overdue_counts / total_count) * 100
+
+# Define colors
+colors = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create the bar chart
 fig = px.bar(
     x=overdue_counts.index,
     y=overdue_counts.values,
     labels={'x': 'Category', 'y': 'Number of Transactions'},
     title='Payment on time',
     color=overdue_counts.index,
-    text_auto=True
+    color_discrete_map=colors,
+    text=[f"{v:.1f}%" for v in percentages]  # Display percentage on bars
 )
+fig.show()
+
+# Overdue flag  by month
+
+# Group by month and overdue flag
+monthly_counts = invoices_cleaned.groupby([
+    invoices_cleaned['Clearing_Date'].dt.to_period('M'), 'Overdue_Flag'
+]).size().unstack().fillna(0)
+
+# Convert period to string for plotting
+monthly_counts.index = monthly_counts.index.astype(str)
+
+# Define colors
+colors = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create the line chart
+fig = px.line(
+    monthly_counts,
+    x=monthly_counts.index,
+    y=monthly_counts.columns,
+    labels={'x': 'Month', 'y': 'Number of Transactions'},
+    title='Overdue vs. Not Overdue Documents Over Time',
+    color_discrete_map=colors
+)
+fig.update_layout(yaxis=dict(range=[0, monthly_counts.values.max() * 1.1]))
 fig.show()
 
 # 4.3. Investigating Amount_GC Column
@@ -393,8 +336,9 @@ fig = px.histogram(
     nbins=20,
     title='Distribution of Transaction Amounts',
     labels={'Amount_GC': 'Amount (Group Currency)'},
-    template='plotly'
+    template='plotly',
 )
+fig.update_traces(marker_color='#27ae60')
 fig.update_layout(xaxis_title='Amount (Group Currency)', yaxis_title='Frequency')
 fig.show()
 # The amount GC column has a highly right-skewed distribution (a long tail)
@@ -408,23 +352,87 @@ fig = px.histogram(
     nbins=50,
     title='Distribution of Log-Transformed Transaction Amounts',
     labels={'Log_Amount_GC': 'Log(Amount (Group Currency))'},
-    template='plotly'
+    template='plotly',
 )
+fig.update_traces(marker_color='#27ae60')
 fig.update_layout(xaxis_title='Log(Amount (Group Currency))', yaxis_title='Frequency')
 fig.show()
 
 # Plot box plot for Amount_GC
-fig = px.box(
-    invoices_cleaned,
-    y='Amount_GC',
+# Compute box plot statistics
+q1 = invoices_cleaned['Amount_GC'].quantile(0.25)
+q3 = invoices_cleaned['Amount_GC'].quantile(0.75)
+median = invoices_cleaned['Amount_GC'].median()
+mean = invoices_cleaned['Amount_GC'].mean()
+iqr = q3 - q1
+lower_bound = q1 - 1.5 * iqr
+upper_bound = q3 + 1.5 * iqr
+
+# Create the box plot
+fig = go.Figure()
+
+# Add the main box plot (green)
+fig.add_trace(go.Box(
+    y=invoices_cleaned['Amount_GC'],
+    name="Transactions",
+    marker_color='#27ae60',  # Green box plot
+    boxpoints='outliers',  # Show outliers
+))
+
+# Add statistics on the right side
+stats_text = f"""
+<b>Statistics:</b><br>
+Median: {median:,.2f}<br>
+Mean: {mean:,.2f}<br>
+Q1: {q1:,.2f}<br>
+Q3: {q3:,.2f}<br>
+IQR: {iqr:,.2f}<br>
+Lower Bound: {lower_bound:,.2f}<br>
+Upper Bound: {upper_bound:,.2f}
+"""
+
+fig.add_annotation(
+    text=stats_text,
+    x=1.05, y=0.5,  # Position on the right side
+    xref="paper", yref="paper",
+    showarrow=False,
+    font=dict(size=14),
+    align="left",
+    bordercolor="#2c3e50",
+    borderwidth=2,
+    bgcolor="white",
+    opacity=0.8
+)
+
+# Update layout
+fig.update_layout(
     title='Box Plot of Transaction Amounts',
-    labels={'Amount_GC': 'Amount (Group Currency)'},
+    yaxis_title='Amount (Group Currency)',
+    xaxis=dict(visible=False),
     template='plotly'
 )
-fig.update_layout(yaxis_title='Amount (Group Currency)')
 fig.show()
 
 # A few outliers are visible with extremely high invoice amounts
+
+# Does the amount matter if the invoice is paid on time
+# Filter invoices with Amount_GC > Q3
+high_value_invoices = invoices_cleaned[invoices_cleaned['Amount_GC'] > 500000]
+
+# Define colors based on Overdue_Flag
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create scatter plot
+fig = px.scatter(
+    high_value_invoices,
+    x='Timeliness',
+    y='Amount_GC',
+    color='Overdue_Flag',
+    title=f'Scatter Plot of High-Value Invoices (Above 500,000 EUR)',
+    labels={'Amount_GC': 'Amount (Group Currency)', 'Timeliness': 'Timeliness'},
+    color_discrete_map=color_map
+)
+fig.show()
 
 # 4.4. Investigating Overdue payments by Company Code
 
@@ -468,20 +476,6 @@ percentage_df = (
     .head(15)
 )
 
-# Plot bar chart for overdue invoice percentage
-fig = px.bar(
-    percentage_df,
-    x=percentage_df.index,
-    y='Invoice_Percentage',
-    title='Top 15 Companies with Overdue Invoices (Percentage of Total Invoices)',
-    labels={'x': 'Company Code', 'Invoice_Percentage': 'Overdue Invoices (%)'},
-    text='Invoice_Percentage',
-    template='plotly'
-)
-fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
-fig.update_layout(xaxis_title='Company Code', yaxis_title='Overdue Invoices (%)')
-fig.show()
-
 # Plot bar chart for overdue amount percentage
 fig = px.bar(
     percentage_df,
@@ -496,6 +490,49 @@ fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
 fig.update_layout(xaxis_title='Company Code', yaxis_title='Overdue Amount (%)')
 fig.show()
 
+# Top 15 Company Codes by Overdue amount as percentage from the total
+# Total amount for the entire dataset
+total_amount = invoices_cleaned['Amount_GC'].sum()
+
+# Total overdue amount by company
+overdue_amounts = overdue_df.groupby('Company_Code')['Amount_GC'].sum()
+
+# Calculate the percentage of overdue amounts based on the total dataset amount
+amount_percentage = (overdue_amounts / total_amount) * 100
+
+# Create a DataFrame and get the top 15 companies by overdue amount percentage
+percentage_df = (
+    pd.DataFrame({'Amount_Percentage': amount_percentage})
+    .sort_values(by='Amount_Percentage', ascending=False)
+    .head(15)
+)
+
+# Define color scale (red → green gradient)
+colorscale = ['#27ae60', '#f39c12', '#e74c3c']  # Red → Orange → Green
+
+# Plot bar chart with color based on Amount_Percentage
+fig = px.bar(
+    percentage_df,
+    x=percentage_df.index,
+    y='Amount_Percentage',
+    title='Top 15 Companies by Overdue Amounts (Percentage of Total Amount)',
+    labels={'x': 'Company Code', 'Amount_Percentage': 'Overdue Amount (%)'},
+    text='Amount_Percentage',
+    template='plotly',
+    color=percentage_df['Amount_Percentage'],  # Use the percentage value for color mapping
+    color_continuous_scale=colorscale  # Apply the color gradient
+)
+fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+
+# Update layout
+fig.update_layout(
+    xaxis_title='Company Code',
+    yaxis_title='Overdue Amount (%)',
+    coloraxis_colorbar=dict(title="Overdue %")  # Color bar label
+)
+fig.show()
+
+
 # 4.5. Investigating the distribution of column Timeliness
 
 # Plot histogram of Timeliness
@@ -506,8 +543,7 @@ fig = px.histogram(
     labels={'Timeliness': 'Timeliness (Days)'},
     template='plotly'
 )
-
-# Update axis titles
+fig.update_traces(marker_color='#27ae60')
 fig.update_layout(
     xaxis_title='Timeliness (Days)',
     yaxis_title='Frequency'
@@ -515,30 +551,87 @@ fig.update_layout(
 fig.show()
 
 # Plot box plot for Timeliness
-fig = px.box(
-    invoices_cleaned,
-    y='Timeliness',
+# Compute statistics
+q1 = invoices_cleaned['Timeliness'].quantile(0.25)
+q3 = invoices_cleaned['Timeliness'].quantile(0.75)
+median = invoices_cleaned['Timeliness'].median()
+mean = invoices_cleaned['Timeliness'].mean()
+iqr = q3 - q1
+lower_bound = q1 - 1.5 * iqr
+upper_bound = q3 + 1.5 * iqr
+min_value = invoices_cleaned['Timeliness'].min()
+max_value = invoices_cleaned['Timeliness'].max()
+
+# Create the box plot
+fig = go.Figure()
+
+# Add main box plot (green)
+fig.add_trace(go.Box(
+    y=invoices_cleaned['Timeliness'],
+    name="Timeliness",
+    marker_color='#27ae60',  # Green box plot
+    boxpoints='outliers',  # Show outliers
+    marker=dict(outliercolor='#e74c3c')  # Red outliers
+))
+
+# Add statistics as a text box on the right
+stats_text = f"""
+<b>Statistics:</b><br>
+Median: {median:,.2f}<br>
+Mean: {mean:,.2f}<br>
+Q1: {q1:,.2f}<br>
+Q3: {q3:,.2f}<br>
+IQR: {iqr:,.2f}<br>
+Min: {min_value:,.2f}<br>
+Max: {max_value:,.2f}<br>
+Lower Bound: {lower_bound:,.2f}<br>
+Upper Bound: {upper_bound:,.2f}
+"""
+
+fig.add_annotation(
+    text=stats_text,
+    x=1.05, y=0.5,  # Positioning
+    xref="paper", yref="paper",
+    showarrow=False,
+    font=dict(size=14),
+    align="left",
+    bordercolor="#2c3e50",
+    borderwidth=2,
+    bgcolor="white",
+    opacity=0.8
+)
+
+# Update layout
+fig.update_layout(
     title='Box Plot of Timeliness Days',
-    labels={'Amount_GC': 'Amount (Group Currency)'},
+    yaxis_title='Timeliness Days',
+    xaxis=dict(visible=False),
     template='plotly'
 )
-fig.update_layout(yaxis_title='Timeliness days')
-fig.show()
 
+fig.show()
 
 # 4.6. Investigating the seasonal trends in the cash flow
 
 # Group by month and count invoices
 monthly_transactions = invoices_cleaned.groupby(invoices_cleaned['Clearing_Date'].dt.to_period('M')).size()
 
-# Plot time series
+# Create time series plot
 fig = px.line(
     x=monthly_transactions.index.astype(str),
     y=monthly_transactions.values,
     title='Trend of Paid Invoices Over Time',
     labels={'x': 'Month', 'y': 'Number of Transactions'}
 )
-fig.update_layout(xaxis_title='Month', yaxis_title='Number of Transactions')
+
+# Set Y-axis to start from 0 and change the line color to green
+fig.update_traces(line=dict(color='#27ae60'))
+fig.update_layout(
+    xaxis_title='Month',
+    yaxis_title='Number of Transactions',
+    yaxis=dict(range=[0, max(monthly_transactions.values) * 1.1])
+)
+
 fig.show()
 
 # Group by month and calculate the sum of Amount_GC
@@ -551,26 +644,56 @@ fig = px.line(
     title='Trend of Paid Invoice Amounts Over Time',
     labels={'x': 'Month', 'y': 'Total Invoice Amount (Group Currency)'}
 )
-
-# Customize layout
 fig.update_layout(
     xaxis_title='Month',
     yaxis_title='Total Invoice Amount (Group Currency)',
-    xaxis=dict(tickangle=45)
+    xaxis=dict(tickangle=45),
+    yaxis=dict(range=[0, max(monthly_amounts.values) * 1.1])
 )
+fig.update_traces(line=dict(color='#27ae60'))
 fig.show()
 
+
 # 4.7. Payment Timeliness by Amount
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create scatter plot
 fig = px.scatter(
     invoices_cleaned,
     x='Amount_GC',
     y='Timeliness',
     color='Overdue_Flag',
     title='Payment Timeliness by Invoice Amount',
-    labels={'Amount_GC': 'Invoice Amount (Group Currency)', 'Timeliness': 'Days Late/Early'}
+    labels={'Amount_GC': 'Invoice Amount (Group Currency)', 'Timeliness': 'Days Late/Early'},
+    color_discrete_map=color_map  # Assign custom colors
 )
-fig.update_layout(xaxis_title='Invoice Amount (Group Currency)', yaxis_title='Timeliness (Days)')
+fig.update_layout(
+    xaxis_title='Invoice Amount (Group Currency)',
+    yaxis_title='Timeliness (Days)'
+)
 fig.show()
+
+# 4.7. Payment Term Days by Amount
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create scatter plot
+fig = px.scatter(
+    invoices_cleaned,
+    x='Payment_Terms_Days',
+    y='Amount_GC',
+    color='Overdue_Flag',
+    title='Payment Term Days by Invoice Amount',
+    labels={'Amount_GC': 'Invoice Amount (Group Currency)', 'Payment Term Days': 'Days Late/Early'},
+    color_discrete_map=color_map  # Assign custom colors
+)
+fig.update_layout(
+    xaxis_title='Invoice Amount (Group Currency)',
+    yaxis_title='Payment Terms (Days)'
+)
+fig.show()
+
 
 # 4.8. Timeliness Distribution by Payment Term
 
@@ -604,6 +727,8 @@ late_payment_percentage = (late_payments / total_payments * 100).fillna(0)
 # Convert the late_payment_percentage Series to a DataFrame for mapping
 late_payment_df = late_payment_percentage.reset_index()
 late_payment_df.columns = ['Country', 'Late Payment Percentage']
+late_payment_df.to_csv(r'C:\Users\ibrossi\Desktop\Project\Data\Late payment percentage by country.csv', index=True)
+
 
 fig = px.choropleth(
     late_payment_df,
@@ -632,16 +757,18 @@ payment_percentage_by_country = (total_payments / all_invoices * 100).fillna(0)
 
 # Convert the late_payment_percentage Series to a DataFrame for mapping
 payment_percentage_by_country_df = payment_percentage_by_country.reset_index()
-payment_percentage_by_country_df.columns = ['Country', 'Payment Percentage']
+payment_percentage_by_country_df.columns = ['Country', 'Invoice Percentage']
+payment_percentage_by_country_df.to_csv(r'C:\Users\ibrossi\Desktop\Project\Data\Invoice percentage by country.csv', index=True)
+
 
 fig = px.choropleth(
     payment_percentage_by_country_df,
     locations="Country",
     locationmode="ISO-3",  # Use ISO-3 country codes
-    color="Payment Percentage",
+    color="Invoice Percentage",
     hover_name="Country",
     color_continuous_scale="Reds",
-    title="Percentage of Payments by Country"
+    title="Percentage of Invoices by Country",
 )
 
 fig.update_layout(
@@ -665,6 +792,7 @@ fig = px.bar(
     text=overdue_percentage.values
 )
 fig.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+fig.update_traces(marker_color='#27ae60')
 fig.update_layout(xaxis_title='Payment Term Code', yaxis_title='Overdue Percentage (%)')
 fig.show()
 
@@ -679,13 +807,137 @@ fig = px.line(
     title='Average Payment Timeliness Over Time',
     labels={'x': 'Date', 'y': 'Average Timeliness (Days)'}
 )
+fig.update_traces(marker_color='#27ae60')
 fig.update_layout(xaxis_title='Date', yaxis_title='Average Timeliness (Days)')
+fig.show()
+
+# 4.13. Invoices with dunning letters - Overdue / Not Overdue
+
+# Filter only invoices with Dunning_Flag = Yes
+dunning_invoices = invoices_cleaned[invoices_cleaned['Dunning_Flag'] == 'Yes']
+
+# Count occurrences of Overdue vs. Not Overdue
+dunning_counts = dunning_invoices.groupby('Overdue_Flag').size().reset_index(name='Count')
+
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create stacked bar chart
+fig = px.bar(
+    dunning_counts,
+    x='Overdue_Flag',
+    y='Count',
+    title='Invoices with dunning letters (Overdue vs. Not Overdue)',
+    labels={'Overdue_Flag': 'Status', 'Count': 'Number of Invoices'},
+    color='Overdue_Flag',
+    color_discrete_map=color_map,
+    text='Count'
+)
+
+# Adjust layout
+fig.update_layout(
+    xaxis_title='Invoice Status',
+    yaxis_title='Number of Invoices'
+)
+
+fig.show()
+
+# 4.14. Overdue vs. Not Overdue invoices by contact type - invoice count
+# Count occurrences of Overdue vs. Not Overdue per Customer_Contact_Type_Description
+contact_counts = invoices_cleaned.groupby(['Customer_Contact_Type_description', 'Overdue_Flag']).size().reset_index(name='Count')
+
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create grouped bar chart
+fig = px.bar(
+    contact_counts,
+    x='Customer_Contact_Type_description',
+    y='Count',
+    title='Overdue vs. Not Overdue Invoices by Customer Contact Type',
+    labels={'Customer_Contact_Type_Description': 'Customer Contact Type', 'Count': 'Number of Invoices'},
+    color='Overdue_Flag',
+    barmode='group',  # Group bars side by side
+    color_discrete_map=color_map,  # Custom colors
+    text='Count'  # Show numbers on bars
+)
+
+# Adjust layout for better readability
+fig.update_traces(texttemplate='%{text}', textposition='outside')
+fig.update_layout(
+    xaxis_title='Customer Contact Type',
+    yaxis_title='Number of Invoices'
+)
+
+fig.show()
+
+# 4.14. Overdue vs. Not Overdue invoices by contact type - sum of invoice amounts
+# Sum Amount_GC for Overdue vs. Not Overdue per Customer_Contact_Type_Description
+contact_amounts = invoices_cleaned.groupby(['Customer_Contact_Type_description', 'Overdue_Flag'])['Amount_GC'].sum().reset_index()
+
+# Convert values to millions
+contact_amounts['Amount_GC'] = contact_amounts['Amount_GC'] / 1000000
+
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create grouped bar chart (summed invoice amounts in millions)
+fig = px.bar(
+    contact_amounts,
+    x='Customer_Contact_Type_description',
+    y='Amount_GC',
+    title='Overdue vs. Not Overdue Amounts by Customer Contact Type (in Millions)',
+    labels={'Customer_Contact_Type_Description': 'Customer Contact Type', 'Amount_GC': 'Total Invoice Amount (Millions)'},
+    color='Overdue_Flag',
+    barmode='group',  # Group bars side by side
+    color_discrete_map=color_map,  # Custom colors
+    text='Amount_GC'  # Show values on bars
+)
+
+# Adjust layout for better readability
+fig.update_traces(texttemplate='%{text:.2f}M', textposition='outside')  # Show values in Millions with 'M' suffix
+fig.update_layout(
+    xaxis_title='Customer Contact Type',
+    yaxis_title='Total Invoice Amount (Millions)'
+)
+
+fig.show()
+
+# 4.14. Disputed invoices - Overdue / Not Overdue
+
+# Filter only invoices with Disputes
+disputed_invoices = invoices_cleaned[invoices_cleaned['Dispute_Category_Description'] != 'No Dispute']
+
+# Count occurrences of Overdue vs. Not Overdue
+disputed_counts = disputed_invoices.groupby('Overdue_Flag').size().reset_index(name='Count')
+
+# Define custom colors
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create stacked bar chart
+fig = px.bar(
+    disputed_counts,
+    x='Overdue_Flag',
+    y='Count',
+    title='Disputed Invoices (Overdue vs. Not Overdue)',
+    labels={'Overdue_Flag': 'Status', 'Count': 'Number of Invoices'},
+    color='Overdue_Flag',
+    color_discrete_map=color_map,
+    text='Count'
+)
+
+# Adjust layout
+fig.update_layout(
+    xaxis_title='Invoice Status',
+    yaxis_title='Number of Invoices'
+)
+
 fig.show()
 
 # 5. Outlier Detection and Treatment
 
 # Initializing the IsolationForest model with a contamination parameter of 0.01
-model = IsolationForest(contamination=0.01, random_state=0)
+model = IsolationForest(n_estimators=100, contamination=0.005, random_state=42)
 
 # Fitting the model on our dataset (converting DataFrame to NumPy to avoid warning)
 outliers_testing_invoices = invoices_cleaned[['Amount_GC', 'Timeliness']]
@@ -694,43 +946,12 @@ outliers_testing_invoices['Outlier_Scores'] = model.fit_predict(outliers_testing
 # Creating a new column to identify outliers (1 for inliers and -1 for outliers)
 outliers_testing_invoices['Is_Outlier'] = [1 if x == -1 else 0 for x in outliers_testing_invoices['Outlier_Scores']]
 
+# Create bar chart
 # Calculate the percentage of inliers and outliers
 outlier_percentage = outliers_testing_invoices['Is_Outlier'].value_counts(normalize=True) * 100
 labels = outlier_percentage.index.map({0: 'Not Outlier', 1: 'Outlier'})
 
-# Create the horizontal bar chart
-fig = go.Figure()
-
-# Add bar trace
-fig.add_trace(go.Bar(
-    x=outlier_percentage.values,  # Percentages
-    y=labels,   # Labels ('Inliers', 'Outliers')
-    orientation='h',              # Horizontal orientation
-))
-
-# Add text labels on the bars
-fig.update_traces(
-    text=[f'{val:.2f}%' for val in outlier_percentage.values],  # Format percentages
-    textposition='outside'  # Place labels outside the bars
-)
-
-# Customize layout
-fig.update_layout(
-    title='Percentage of Inliers and Outliers',
-    xaxis=dict(
-        title='Percentage (%)',
-        tickvals=list(range(0, 101, 10))  # Tick marks every 10%
-    ),
-    yaxis=dict(title='Is Outlier', autorange='reversed'),  # Reverse y-axis order
-    template='plotly_white',
-    height=400,
-    width=800
-)
-
-# Show the plot
-fig.show()
-
-# About 1% of the customers have been identified as outliers in our dataset.
+# Less than 1% of the customers have been identified as outliers in our dataset.
 # This percentage seems to be a reasonable proportion, not too high to lose a significant
 # amount of data, and not too low to retain potentially noisy data points.
 
@@ -749,6 +970,12 @@ invoices_cleaned = invoices_cleaned.drop(columns=['Is_Outlier'])
 
 # Reset the index of the cleaned data
 invoices_cleaned.reset_index(drop=True, inplace=True)
+
+# Remove all invoices with Amount_GC > 1000000 as they also are outliers but the Isolation Forest model does not recognize them as such
+invoices_cleaned = invoices_cleaned[~(invoices_cleaned['Amount_GC'] >= 1000000)]
+
+# Reset the index
+invoices_cleaned = invoices_cleaned.reset_index(drop=True)
 
 # 6. Splitting the data into train, validation and test dataframes
 # Sort the data by Clearing_Date in ascending order
@@ -786,7 +1013,10 @@ distribution_df = pd.DataFrame({
 # Reshape the DataFrame for grouped bar plotting
 distribution_df = distribution_df.melt(id_vars='Overdue_Flag', var_name='Set', value_name='Percentage')
 
-# Create the grouped bar chart
+# Define custom color mapping
+color_map = {'Overdue': '#e74c3c', 'Not Overdue': '#27ae60'}
+
+# Create the grouped bar chart with custom colors
 fig = px.bar(
     distribution_df,
     x='Set',
@@ -794,7 +1024,9 @@ fig = px.bar(
     color='Overdue_Flag',
     barmode='group',
     title='Distribution of Overdue Flag Across Train, Validation, and Test Sets',
-    labels={'Set': 'Dataset', 'Percentage': 'Percentage (%)', 'Overdue_Flag': 'Overdue Status'}
+    labels={'Set': 'Dataset', 'Percentage': 'Percentage (%)', 'Overdue_Flag': 'Overdue Status'},
+    color_discrete_map=color_map,
+    text_auto=True
 )
 
 # Show the plot
@@ -803,174 +1035,143 @@ fig.show()
 # 7. Feature Engineering
 # 7.1. Customer's historical payment behavior
 
-def generate_customer_features(invoices_df):
-    # 1) General features
-    # Invoice Count
-    cust_features = invoices_df.groupby('Payer_Code')['Unique_Key'].count().reset_index()
-    cust_features = cust_features.rename(columns={'Unique_Key': 'Invoices_Paid'})
 
-    # Total Invoice Amount
-    total_invoice_amount = invoices_df.groupby('Payer_Code')['Amount_GC'].sum().reset_index()
+def generate_customer_features(invoices_df, time_window_months):
+    """
+    Generate customer-level features from invoice data, considering only invoices from the last 'time_window_months' months.
+
+    Parameters:
+    - invoices_df (pd.DataFrame): DataFrame containing invoice data.
+    - time_window_months (int): The number of months to consider for calculations (e.g., 6, 12, 16).
+
+    Returns:
+    - cust_features (pd.DataFrame): DataFrame with customer-level aggregated features.
+    """
+
+    # Determine the cutoff date for the time window
+    max_date = invoices_df['Clearing_Date'].max()
+
+    # Calculate the cutoff date, ensuring it starts from the first of the month
+    cutoff_date = (max_date - pd.DateOffset(months=time_window_months)).replace(day=1)
+    print(cutoff_date)
+
+    # Filter invoices within the specified time window
+    filtered_invoices = invoices_df[invoices_df['Clearing_Date'] >= cutoff_date]
+
+    # 1) General Features
+    cust_features = filtered_invoices.groupby('Payer_Code')['Unique_Key'].count().reset_index()
+    cust_features.rename(columns={'Unique_Key': 'Invoices_Paid'}, inplace=True)
+
+    # Total invoice amount
+    total_invoice_amount = filtered_invoices.groupby('Payer_Code')['Amount_GC'].sum().reset_index()
     total_invoice_amount.rename(columns={'Amount_GC': 'Total_Amount'}, inplace=True)
-    cust_features = pd.merge(cust_features, total_invoice_amount, on='Payer_Code')
+    cust_features = pd.merge(cust_features, total_invoice_amount, on='Payer_Code', how='left')
 
-    # Average Invoice Amount
-    average_invoice_amount = invoices_df.groupby('Payer_Code')['Amount_GC'].mean().reset_index()
+    # Average invoice amount
+    average_invoice_amount = filtered_invoices.groupby('Payer_Code')['Amount_GC'].mean().reset_index()
     average_invoice_amount.rename(columns={'Amount_GC': 'Average_Amount'}, inplace=True)
-    cust_features = pd.merge(cust_features, average_invoice_amount, on='Payer_Code')
+    cust_features = pd.merge(cust_features, average_invoice_amount, on='Payer_Code', how='left')
 
-    # Maximum and Minimum Invoice Amount:
-    min_invoice_amount = invoices_df.groupby('Payer_Code')['Amount_GC'].min().reset_index()
-    max_invoice_amount = invoices_df.groupby('Payer_Code')['Amount_GC'].max().reset_index()
-
+    # Min & Max invoice amount
+    min_invoice_amount = filtered_invoices.groupby('Payer_Code')['Amount_GC'].min().reset_index()
+    max_invoice_amount = filtered_invoices.groupby('Payer_Code')['Amount_GC'].max().reset_index()
     min_invoice_amount.rename(columns={'Amount_GC': 'Min_Invoice_Amount'}, inplace=True)
     max_invoice_amount.rename(columns={'Amount_GC': 'Max_Invoice_Amount'}, inplace=True)
+    cust_features = pd.merge(cust_features, min_invoice_amount, on='Payer_Code', how='left')
+    cust_features = pd.merge(cust_features, max_invoice_amount, on='Payer_Code', how='left')
 
-    cust_features = pd.merge(cust_features, min_invoice_amount, on='Payer_Code')
-    cust_features = pd.merge(cust_features, max_invoice_amount, on='Payer_Code')
-
-    # Invoice Amount Variability
-    std_invoice_amount = invoices_df.groupby('Payer_Code')['Amount_GC'].std().reset_index()
-    std_invoice_amount.rename(columns={'Amount_GC': 'Invoice_Amount_Std'}, inplace=True)
-    cust_features = pd.merge(cust_features, std_invoice_amount, on='Payer_Code')
-    cust_features['Invoice_Amount_Std'] = cust_features['Invoice_Amount_Std'].fillna(0)
+    # Count of disputes
+    disputes_count = filtered_invoices[filtered_invoices['Dispute_Category_Description'] != 'No Dispute'].groupby('Payer_Code')['Dispute_Category_Description'].count().reset_index()
+    disputes_count.rename(columns={'Dispute_Category_Description': 'Total_Disputes'}, inplace=True)
+    cust_features = pd.merge(cust_features, disputes_count, on='Payer_Code', how='left')
 
     # 2) Timeliness-Based Features
-    # Average Timeliness
-    average_timeliness = invoices_df.groupby('Payer_Code')['Timeliness'].mean().reset_index()
+    average_timeliness = filtered_invoices.groupby('Payer_Code')['Timeliness'].mean().reset_index()
     average_timeliness.rename(columns={'Timeliness': 'Average_Timeliness'}, inplace=True)
-    cust_features = pd.merge(cust_features, average_timeliness, on='Payer_Code')
+    cust_features = pd.merge(cust_features, average_timeliness, on='Payer_Code', how='left')
 
-    # Average Days Paid Late
-    average_days_paid_late = invoices_df[invoices_df['Timeliness'] > 0].groupby('Payer_Code')['Timeliness'].mean().reset_index()
-    average_days_paid_late.rename(columns={'Timeliness': 'Average_Days_Paid_Late'}, inplace=True)
-    cust_features = pd.merge(cust_features, average_days_paid_late, on='Payer_Code', how='left')
-    cust_features['Average_Days_Paid_Late'] = cust_features['Average_Days_Paid_Late'].fillna(0)
+    # Average paid late days
+    average_paid_late_days = filtered_invoices[filtered_invoices['Timeliness'] > 0].groupby('Payer_Code')['Timeliness'].mean().reset_index()
+    average_paid_late_days.rename(columns={'Timeliness': 'Average_Paid_Late_Days'}, inplace=True)
+    cust_features = pd.merge(cust_features, average_paid_late_days, on='Payer_Code', how='left')
 
-    # Average Days Paid Early
-    average_days_paid_early = invoices_df[invoices_df['Timeliness'] <= 0].groupby('Payer_Code')['Timeliness'].mean().reset_index()
-    average_days_paid_early.rename(columns={'Timeliness': 'Average_Days_Paid_Early'}, inplace=True)
-    cust_features = pd.merge(cust_features, average_days_paid_early, on='Payer_Code', how='left')
-    cust_features['Average_Days_Paid_Early'] = cust_features['Average_Days_Paid_Early'].fillna(0)
+    # Average paid early days
+    average_paid_early_days = filtered_invoices[filtered_invoices['Timeliness'] <= 0].groupby('Payer_Code')['Timeliness'].mean().reset_index()
+    average_paid_early_days.rename(columns={'Timeliness': 'Average_Paid_Early_Days'}, inplace=True)
+    cust_features = pd.merge(cust_features, average_paid_early_days, on='Payer_Code', how='left')
 
-    # Percentage of On-Time Payments
-    on_time_payments = invoices_df[invoices_df['Timeliness'] <= 0].groupby('Payer_Code').size().reset_index()
+    # Percentage of On-Time & Overdue Payments
+    on_time_payments = filtered_invoices[filtered_invoices['Timeliness'] <= 0].groupby(
+        'Payer_Code').size().reset_index()
     on_time_payments.rename(columns={0: 'On_Time_Payments'}, inplace=True)
     cust_features = pd.merge(cust_features, on_time_payments, on='Payer_Code', how='left')
     cust_features['On_Time_Payments'] = cust_features['On_Time_Payments'].fillna(0)
     cust_features['Percentage_On_Time_Payments'] = cust_features['On_Time_Payments'] / cust_features['Invoices_Paid']
 
-    # Percentage of Not On-Time Payments
-    not_on_time_payments = invoices_df[invoices_df['Timeliness'] > 0].groupby('Payer_Code').size().reset_index()
+    not_on_time_payments = filtered_invoices[filtered_invoices['Timeliness'] > 0].groupby(
+        'Payer_Code').size().reset_index()
     not_on_time_payments.rename(columns={0: 'Not_On_Time_Payments'}, inplace=True)
     cust_features = pd.merge(cust_features, not_on_time_payments, on='Payer_Code', how='left')
     cust_features['Not_On_Time_Payments'] = cust_features['Not_On_Time_Payments'].fillna(0)
-    cust_features['Percentage_Not_On_Time_Payments'] = cust_features['Not_On_Time_Payments'] / cust_features['Invoices_Paid']
+    cust_features['Percentage_Not_On_Time_Payments'] = cust_features['Not_On_Time_Payments'] / cust_features[
+        'Invoices_Paid']
 
-    # 3) Overdue and Dunning Features
-    # Total Overdue Amount:
-    total_overdue_amount = invoices_df[invoices_df['Overdue_Flag'] == 'Overdue'].groupby('Payer_Code')['Amount_GC'].sum().reset_index()
+    # 3) Overdue Amount Features
+    total_overdue_amount = filtered_invoices[filtered_invoices['Overdue_Flag'] == 'Overdue'].groupby('Payer_Code')[
+        'Amount_GC'].sum().reset_index()
     total_overdue_amount.rename(columns={'Amount_GC': 'Total_Overdue_Amount'}, inplace=True)
     cust_features = pd.merge(cust_features, total_overdue_amount, on='Payer_Code', how='left')
     cust_features['Total_Overdue_Amount'] = cust_features['Total_Overdue_Amount'].fillna(0)
 
-    # Percentage of Overdue Amount
     cust_features['Percentage_Overdue_Amount'] = cust_features['Total_Overdue_Amount'] / cust_features['Total_Amount']
     cust_features['Percentage_Overdue_Amount'] = cust_features['Percentage_Overdue_Amount'].fillna(0)
 
-    # Has Dunning History: Whether the customer has any history of dunning actions
-    has_dunning = (invoices_df['LastDunning_Level'] != 0).groupby(invoices_df['Payer_Code']).any().astype(int).reset_index()
-    has_dunning.rename(columns={'LastDunning_Level': 'Has_Dunning_History'}, inplace=True)
-    cust_features = pd.merge(cust_features, has_dunning, on='Payer_Code')
-
-    # Average Dunning Level: Mean dunning level for customers with dunning actions
-    average_dunning_level = invoices_df.groupby('Payer_Code')['LastDunning_Level'].mean().reset_index()
-    average_dunning_level.rename(columns={'LastDunning_Level': 'Average_Dunning_Level'}, inplace=True)
-    cust_features = pd.merge(cust_features, average_dunning_level, on='Payer_Code')
-
     # 4) Temporal Features
-    # First and Last Invoice Dates: Time span of the customer's activity
-    first_invoice_date = invoices_df.groupby('Payer_Code')['Document_Date'].min().reset_index()
-    last_invoice_date = invoices_df.groupby('Payer_Code')['Document_Date'].max().reset_index()
-
+    first_invoice_date = filtered_invoices.groupby('Payer_Code')['Document_Date'].min().reset_index()
+    last_invoice_date = filtered_invoices.groupby('Payer_Code')['Document_Date'].max().reset_index()
     first_invoice_date.rename(columns={'Document_Date': 'First_Invoice_Date'}, inplace=True)
     last_invoice_date.rename(columns={'Document_Date': 'Last_Invoice_Date'}, inplace=True)
+    cust_features = pd.merge(cust_features, first_invoice_date, on='Payer_Code', how='left')
+    cust_features = pd.merge(cust_features, last_invoice_date, on='Payer_Code', how='left')
 
-    cust_features = pd.merge(cust_features, first_invoice_date, on='Payer_Code')
-    cust_features = pd.merge(cust_features, last_invoice_date, on='Payer_Code')
+    # Invoice Recency: Days since the last invoice in the selected window
+    cust_features['Invoice_Recency'] = (max_date - cust_features['Last_Invoice_Date']).dt.days
 
-    # Invoice Recency: Days since the last invoice
-    cust_features['Invoice_Recency'] = (invoices_df['Clearing_Date'].max() - cust_features['Last_Invoice_Date']).dt.days
-
-    # Seasonality of Payments: Proportion of invoices paid in specific months
-    invoices_paid_in_q1 = invoices_df[invoices_df['Clearing_Date'].dt.month.isin([1, 2, 3])].groupby('Payer_Code').size().reset_index()
-    invoices_paid_in_q2 = invoices_df[invoices_df['Clearing_Date'].dt.month.isin([4, 5, 6])].groupby('Payer_Code').size().reset_index()
-    invoices_paid_in_q3 = invoices_df[invoices_df['Clearing_Date'].dt.month.isin([7, 8, 9])].groupby('Payer_Code').size().reset_index()
-    invoices_paid_in_q4 = invoices_df[invoices_df['Clearing_Date'].dt.month.isin([10, 11, 12])].groupby('Payer_Code').size().reset_index()
-
-    invoices_paid_in_q1.rename(columns={0: 'Invoices_Paid_in_Q1'}, inplace=True)
-    invoices_paid_in_q2.rename(columns={0: 'Invoices_Paid_in_Q2'}, inplace=True)
-    invoices_paid_in_q3.rename(columns={0: 'Invoices_Paid_in_Q3'}, inplace=True)
-    invoices_paid_in_q4.rename(columns={0: 'Invoices_Paid_in_Q4'}, inplace=True)
-
-    cust_features = pd.merge(cust_features, invoices_paid_in_q1, on='Payer_Code', how='left')
-    cust_features = pd.merge(cust_features, invoices_paid_in_q2, on='Payer_Code', how='left')
-    cust_features = pd.merge(cust_features, invoices_paid_in_q3, on='Payer_Code', how='left')
-    cust_features = pd.merge(cust_features, invoices_paid_in_q4, on='Payer_Code', how='left')
-
-    cust_features['Invoices_Paid_in_Q1'] = cust_features['Invoices_Paid_in_Q1'].fillna(0)
-    cust_features['Invoices_Paid_in_Q2'] = cust_features['Invoices_Paid_in_Q2'].fillna(0)
-    cust_features['Invoices_Paid_in_Q3'] = cust_features['Invoices_Paid_in_Q3'].fillna(0)
-    cust_features['Invoices_Paid_in_Q4'] = cust_features['Invoices_Paid_in_Q4'].fillna(0)
-
-    # 5)  Interaction Features
-    # Credit Utilization Ratio: Ratio of total invoice amounts to credit limits
-    credit_limit = invoices_df.groupby('Payer_Code')['Credit_Limit'].first().reset_index()
-    cust_features = pd.merge(cust_features, credit_limit, on='Payer_Code')
+    # 5) Interaction Features - Credit Utilization
+    credit_limit = filtered_invoices.groupby('Payer_Code')['Credit_Limit'].first().reset_index()
+    cust_features = pd.merge(cust_features, credit_limit, on='Payer_Code', how='left')
     cust_features['Credit_Utilization'] = cust_features['Total_Amount'] / cust_features['Credit_Limit']
 
-    # Replace inf values with 0
+    # Replace infinite values with 0
     cust_features['Credit_Utilization'] = cust_features['Credit_Utilization'].replace([float('inf'), -float('inf')], 0)
 
-    # Drop the columns that are useless
-    cust_features = cust_features.drop(['First_Invoice_Date', 'Last_Invoice_Date', 'Credit_Limit'], axis=1)
+    # Drop unnecessary columns
+    cust_features.drop(['First_Invoice_Date', 'Last_Invoice_Date', 'Credit_Limit'], axis=1, inplace=True)
+
+    # Fill NaN values with 0 for all numeric columns
+    cust_features = cust_features.fillna(0)
 
     return cust_features
 
-customer_features = generate_customer_features(train_set)
+
+customer_features = generate_customer_features(train_set, time_window_months=12)
 print(customer_features.head())
+print(customer_features.isna().sum())
 
 # 7.2. Dummy features
 
 def generate_dummy_features(invoices_df):
-    # # 1) Timeliness Buckets
-    # # Apply one-hot encoding
-    # dummies = pd.get_dummies(invoices_df, columns=['Timeliness_Description'], prefix='', prefix_sep='')
-    #
-    # # Ensure the output is integers (0 and 1)
-    # dummies['Before DueDate'] = dummies['Before DueDate'].astype(int)
-    # dummies['On DueDate'] = dummies['On DueDate'].astype(int)
-    # dummies['Due 1-7 days'] = dummies['Due 1-7 days'].astype(int)
-    # dummies['Due 8-30 days'] = dummies['Due 8-30 days'].astype(int)
-    # dummies['Due >30 days'] = dummies['Due >30 days'].astype(int)
-    #
-    # # Rename the column names
-    # dummies.rename(columns={'Before DueDate': 'Paid_Before_Due_Date_Flag'}, inplace=True)
-    # dummies.rename(columns={'On DueDate': 'Paid_On_Due_Date_Flag'}, inplace=True)
-    # dummies.rename(columns={'Due 1-7 days': 'Paid_After_Due_Date_1_7_Flag'}, inplace=True)
-    # dummies.rename(columns={'Due 8-30 days': 'Paid_After_Due_Date_8_30_Flag'}, inplace=True)
-    # dummies.rename(columns={'Due >30 days': 'Paid_After_Due_Date_>30_Flag'}, inplace=True)
 
-    # 2) Dunning Block
+    # 1) Dunning Block
     # Transform 'DunningBlock' into binary column
     dummies = invoices_df.copy()
     dummies['Has_Dunning_Block_Flag'] = dummies['DunningBlock_MANSP'].apply(lambda x: 0 if x == 'No Dunning Block' else 1)
 
-    # 3) Overdue Flag
+    # 2) Overdue Flag
     # Transform 'Overdue_Flag' into binary column
     dummies['Is_Overdue_Flag'] = dummies['Overdue_Flag'].apply(lambda x: 1 if x == 'Overdue' else 0)
 
-    # 4) Customer Contact Type description
+    # 3) Customer Contact Type description
     # Create Contacted_Flag
     dummies['Contacted_Flag'] = dummies['Customer_Contact_Type_description'].apply(
         lambda x: 0 if x == 'Not Contacted' else 1)
@@ -985,7 +1186,7 @@ def generate_dummy_features(invoices_df):
     dummies['Contacted_By_Visit_Flag'] = dummies['Customer_Contact_Type_description'].apply(
         lambda x: 1 if x == 'Visit' else 0)
 
-    # 5) Customer Contact Result description
+    # 4) Customer Contact Result description
 
     # Define the set of values indicating successful contact
     successful_contact_values = {'Email', 'Customer Reached', 'contacted by customer'}
@@ -994,17 +1195,14 @@ def generate_dummy_features(invoices_df):
     dummies['Successfully_Reached_Flag'] = dummies['Customer_Contact_Result_description'].apply(
         lambda x: 1 if x in successful_contact_values else 0)
 
-    # 6) Comment Flag, Effect Flag, Dunning_Flag
+    # 5) Comment Flag Dunning_Flag
     # Transform 'Comment_Flag' into binary column
     dummies['Comment_Flag'] = dummies['Comment_Flag'].apply(lambda x: 1 if x == 'Yes' else 0)
-
-    # Transform 'Effect_Flag' into binary column
-    dummies['Effect_Flag'] = dummies['Effect_Flag'].apply(lambda x: 1 if x == 'Yes' else 0)
 
     # Transform 'Dunning_Flag' into binary column
     dummies['Dunning_Flag'] = dummies['Dunning_Flag'].apply(lambda x: 1 if x == 'Yes' else 0)
 
-    # 7) Account Channel Description
+    # 6) Account Channel Description
     # Define the most important channels
     channels = ['Service Provider', 'End User', 'OEM', 'Dealer', 'Customer Finance', 'Importer']
 
@@ -1014,9 +1212,9 @@ def generate_dummy_features(invoices_df):
         dummies[column_name] = dummies['AccountChannel_Description'].apply(
             lambda x: 1 if x == value else 0)
 
-    # 8) Country of the customer
-    # Filter countries with Payment Percentage > 5%
-    countries_over_5_percent = payment_percentage_by_country_df[payment_percentage_by_country_df['Payment Percentage'] > 5]['Country']
+    # 7) Country of the customer
+    # Filter countries with Invoice Percentage > 5%
+    countries_over_5_percent = payment_percentage_by_country_df[payment_percentage_by_country_df['Invoice Percentage'] > 5]['Country']
     countries_over_5_percent_df = countries_over_5_percent.reset_index()
     countries_over_5_percent_df.columns = ['Index','Country']
 
@@ -1041,7 +1239,7 @@ def generate_dummy_features(invoices_df):
     dummies['Country_Sweden'] = dummies['Country_ISO3'].apply(lambda x: 1 if x == 'SWE' else 0)
     dummies['Country_Netherlands'] = dummies['Country_ISO3'].apply(lambda x: 1 if x == 'NLD' else 0)
 
-    # 9) Dispute Category Description
+    # 8) Dispute Category Description
     # Create Disputed_Flag
     dummies['Disputed_Flag'] = dummies['Dispute_Category_Description'].apply(
         lambda x: 0 if x == 'No Dispute' else 1)
@@ -1056,31 +1254,46 @@ def generate_dummy_features(invoices_df):
     dummies['Disputed_Administration_Flag'] = dummies['Dispute_Category_Description'].apply(
         lambda x: 1 if x == 'Administration' else 0)
 
-    # 10) Promise State Description
+    # 9) Promise State Description
     # Create Promise_Flag
     dummies['Promise_Flag'] = dummies['State_Description'].apply(
         lambda x: 0 if x == 'Not Contacted' else 1)
 
-    # Create kept/broken promise flags
-    dummies['Kept_Promise_Flag'] = dummies['State_Description'].apply(
-        lambda x: 1 if x == 'Kept' or x == 'Partially Kept' else 0)
-
+    # Create broken promise flags
     dummies['Broken_Promise_Flag'] = dummies['State_Description'].apply(
         lambda x: 1 if x == 'Broken' else 0)
 
-    # 11) Interest Flag
+    # 10) Interest Flag
     dummies['Interest_Flag'] = dummies['Interest_Flag'].apply(
         lambda x: 0 if x == 'No Interest Charged' else 1)
 
-    # 12) Due date falling on a weekend
-
+    # 11) Due date falling on a weekend
     # Create a flag for weekends (Saturday = 5, Sunday = 6)
     dummies['Due_Date_Is_Weekend'] = dummies['DueDate'].dt.weekday.apply(lambda x: 1 if x >= 5 else 0)
+
+    # 12) Lagged variable for the Timeliness and the Target (Overdue_Flag) column based on the previously cleared invoice for each payer
+    # Sort by Payer_Code and Clearing_Date to ensure proper order
+    dummies = dummies.sort_values(by=['Payer_Code', 'Clearing_Date'])
+
+    # Create a lagged columns (previous cleared invoice)
+    dummies['Timeliness_Lagged'] = dummies.groupby('Payer_Code')['Timeliness'].shift(1)
+    dummies['Is_Overdue_Flag_Lagged'] = dummies.groupby('Payer_Code')['Is_Overdue_Flag'].shift(1)
+
+    # Fill NaN values (cases where no previous invoice exists) with 0
+    dummies['Timeliness_Lagged'] = dummies['Timeliness_Lagged'].fillna(0)
+    dummies['Is_Overdue_Flag_Lagged'] = dummies['Is_Overdue_Flag_Lagged'].fillna(0)
+
+    # 13) Seasonal Trends
+    # Extract Invoice Month
+    dummies['Invoice_Month'] = dummies['Document_Date'].dt.month
+
+    # Extract Invoice Quarter
+    dummies['Invoice_Quarter'] = dummies['Document_Date'].dt.quarter
 
     # Drop the useless columns
     dummies = dummies.drop(['DunningBlock_MANSP', 'Overdue_Flag', 'Customer_Contact_Type_description',
                                           'Customer_Contact_Result_description', 'Comment', 'AccountChannel_Description', 'Country_LAND1',
-                                          'Dispute_Category_Description', 'Dispute_Reason_Description', 'State_Description', 'Country_ISO3'], axis=1)
+                                          'Dispute_Category_Description', 'Dispute_Reason_Description', 'State_Description', 'Country_ISO3', 'Effect_Flag'], axis=1)
 
     return dummies
 
@@ -1108,9 +1321,13 @@ final_train_set = train_df.merge(customer_features, on='Payer_Code', how='left')
 # X, Y training set
 X_train = final_train_set.drop(['Company_Code', 'Accounting_Document', 'Document_Date', 'Posting_Date','DueDate',
                                         'Group_Currency', 'Clearing_Date', 'PayT_Code', 'Unique_Key','Amount_GC',
-                                        'Credit_Limit', 'Comment_Flag', 'Effect_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
+                                        'Credit_Limit', 'Comment_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
 
 y_train = final_train_set['Is_Overdue_Flag']
+
+# Fill NaNs with 0
+X_train = X_train.fillna(0)
+print(X_train.isna().sum())
 
 # 8.2. Validation dataset
 dummified_validation_set = generate_dummy_features(validation_set)
@@ -1123,18 +1340,20 @@ final_validation_set = validation_df.merge(customer_features, on='Payer_Code', h
 
 X_validation = final_validation_set.drop(['Company_Code', 'Accounting_Document', 'Document_Date', 'Posting_Date','DueDate',
                                         'Group_Currency', 'Clearing_Date', 'PayT_Code', 'Unique_Key','Amount_GC',
-                                        'Credit_Limit', 'Comment_Flag', 'Effect_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
+                                        'Credit_Limit', 'Comment_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
 
 y_validation = final_validation_set['Is_Overdue_Flag']
 
 # New customers are present in the validation dataset, replace missing values with global statistics (median):
 print(X_validation.isna().sum())
 
-# Fill NaNs with the median of the corresponding feature from training data
-for col in customer_features.columns:
-    if col in X_validation.columns:
-        X_validation[col] = X_validation[col].fillna(customer_features[col].median())
+# # Fill NaNs with the median of the corresponding feature from training data
+# for col in customer_features.columns:
+#     if col in X_validation.columns:
+#         X_validation[col] = X_validation[col].fillna(customer_features[col].median())
 
+# Fill NaNs with 0
+X_validation = X_validation.fillna(0)
 print(X_validation.isna().sum())
 
 # 8.3. Test dataset
@@ -1148,18 +1367,20 @@ final_test_set = test_df.merge(customer_features, on='Payer_Code', how='left')
 
 X_test = final_test_set.drop(['Company_Code', 'Accounting_Document', 'Document_Date', 'Posting_Date','DueDate',
                                         'Group_Currency', 'Clearing_Date', 'PayT_Code', 'Unique_Key','Amount_GC',
-                                        'Credit_Limit', 'Comment_Flag', 'Effect_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
+                                        'Credit_Limit', 'Comment_Flag', 'Is_Overdue_Flag', 'Timeliness_Description', 'Timeliness'], axis=1)
 
 y_test = final_test_set['Is_Overdue_Flag']
 
 # New customers are present in the test dataset, replace missing values with global statistics (median):
 print(X_test.isna().sum())
 
-# Fill NaNs with the median of the corresponding feature from training data
-for col in customer_features.columns:
-    if col in X_test.columns:
-        X_test[col] = X_test[col].fillna(customer_features[col].median())
+# # Fill NaNs with the median of the corresponding feature from training data
+# for col in customer_features.columns:
+#     if col in X_test.columns:
+#         X_test[col] = X_test[col].fillna(customer_features[col].median())
 
+# Fill NaNs with 0
+X_test = X_test.fillna(0)
 print(X_test.isna().sum())
 
 # 8. Correlation Analysis
@@ -1171,25 +1392,35 @@ corr = X_train.drop(columns=['Payer_Code']).corr()
 corr_long = corr.reset_index().melt(id_vars='index', var_name='Feature2', value_name='Correlation')
 corr_long.rename(columns={'index': 'Feature1'}, inplace=True)
 
-# Create the heatmap with Plotly
-fig = px.imshow(
-    corr,
-    labels=dict(x="Features", y="Features", color="Correlation"),
-    title="Correlation Matrix",
-    color_continuous_scale=['#ff6200', '#ffcaa8', 'white', '#ffcaa8', '#ff6200'],
-    zmin=-1,
-    zmax=1
+
+# Calculate correlation between features and 'Days_to_Payment' (DTP)
+correlations = X_train.drop(columns=['Payer_Code']).corrwith(y_train).sort_values(ascending=False)
+
+# Convert to DataFrame for visualization
+corr_df = pd.DataFrame({
+    'Feature': correlations.index,
+    'Correlation': correlations.values
+}).sort_values(by='Correlation', ascending=True)  # Sort in ascending order
+
+# Create the horizontal bar plot
+fig = px.bar(
+    corr_df,
+    x='Correlation',
+    y='Feature',
+    orientation='h',
+    title="Correlation Scores Between Features and Target Variable",
+    labels={'Correlation': 'Correlation Value', 'Feature': 'Features'},
+    color='Correlation',
+    color_continuous_scale=['#ff6200', '#ffcaa8', 'white', '#a8ffc3', '#00b050']  # Red to Green gradient
 )
 
 # Adjust layout
 fig.update_layout(
-    xaxis_title="Features",
+    width=900, height=600,
+    xaxis_title="Correlation Value",
     yaxis_title="Features",
-    width=800,
-    height=800
+    showlegend=False
 )
-
-# Show the plot
 fig.show()
 
 # There are some pairs of variables that have high correlations, implying a degree of multicollinearity.
@@ -1200,7 +1431,7 @@ scaler = MinMaxScaler()
 # scaler = StandardScaler()
 
 # List of columns that don't need to be scaled
-columns_to_exclude = ['Payer_Code']
+columns_to_exclude = []
 
 # List of columns that need to be scaled
 columns_to_scale = X_train.columns.difference(columns_to_exclude)
@@ -1221,58 +1452,63 @@ X_val_scaled.head(5)
 X_test_scaled.head(5)
 
 # 10. Model training
+# Function to build the neural network model
+def build_nn_model(input_dim):
+    model = Sequential([
+        Dense(64, kernel_initializer='he_normal', input_shape=(input_dim,)),
+        BatchNormalization(),
+        LeakyReLU(alpha=0.1),  # Use LeakyReLU instead of ReLU
+        Dropout(0.3),
+
+        Dense(32, kernel_initializer='he_normal'),
+        BatchNormalization(),
+        LeakyReLU(alpha=0.1),
+        Dropout(0.2),
+
+        Dense(16, kernel_initializer='he_normal'),
+        BatchNormalization(),
+        LeakyReLU(alpha=0.1),
+
+        Dense(1, activation='sigmoid')  # Binary classification
+    ])
+
+    model.compile(optimizer=Adam(learning_rate=0.001),
+                  loss='binary_crossentropy',
+                  metrics=['accuracy', keras.metrics.AUC()])
+
+    return model
 
 # Step 1: Define models
 models = {
     "Logistic Regression": LogisticRegression(penalty='l2',max_iter=1000, random_state=42),
-    "Decision Tree": DecisionTreeClassifier(criterion='gini', splitter='best', max_depth=5, random_state=42),
-    # "Random Forest": RandomForestClassifier(n_estimators=500, criterion='gini', random_state=42, bootstrap=True),
-    "Random Forest": RandomForestClassifier(n_estimators=1000,  # Increase trees for better generalization
-    max_depth=15,       # Deeper trees can capture more complexity
-    min_samples_split=5,  # Prevents overfitting by requiring more samples per split
-    min_samples_leaf=2,  # Ensures each leaf has enough samples
-    bootstrap=True,
-    random_state=42),
-    # "XGBoost": XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42),
-     "XGBoost": XGBClassifier(n_estimators=500,       # More boosting rounds
-    learning_rate=0.05,     # Smaller learning rate for better accuracy
-    max_depth=6,            # Prevents overfitting
-    subsample=0.8,          # Prevents overfitting by using only 80% of data
-    colsample_bytree=0.8,   # Random feature selection for each tree
-    use_label_encoder=False,
-    eval_metric='logloss',
-    random_state=42),
-    # "LightGBM": LGBMClassifier(n_estimators=100, random_state=42),
-    "LightGBM": LGBMClassifier(n_estimators=500,  # More boosting rounds
-    learning_rate=0.05,  # Slower learning rate for better accuracy
-    max_depth=-1,  # No depth limit
-    num_leaves=31,  # More leaves allow complex trees
-    subsample=0.8,  # Uses 80% of the data
-    colsample_bytree=0.8,  # Random feature selection
-    random_state=42),
+    # "Decision Tree": DecisionTreeClassifier(criterion='gini', splitter='best', max_depth=5, random_state=42),
+    "Decision Tree": DecisionTreeClassifier(criterion='entropy', min_samples_leaf=1, max_depth=5, min_samples_split=2, random_state=42), # the best model tunned with Grid Search
+    "Random Forest": RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_leaf=2, criterion='gini', random_state=42, bootstrap=True), # AUC 0.9121
+    # "Random Forest": RandomForestClassifier(n_estimators=1000,  max_depth=15, min_samples_split=5, min_samples_leaf=2, bootstrap=True, random_state=42),
+    # "Random Forest": RandomForestClassifier(n_estimators=10, max_depth=12, min_samples_split=10, min_samples_leaf=5, bootstrap=True, random_state=42),
+    # "XGBoost": XGBClassifier(n_estimators=1000, learning_rate=0.005, max_depth=6, subsample=0.8, eval_metric='logloss', random_state=42),
+    # "XGBoost": XGBClassifier(n_estimators=500, learning_rate=0.05, max_depth=6, subsample=0.8, colsample_bytree=0.8, use_label_encoder=False, eval_metric='logloss', random_state=42),
+    # "XGBoost": XGBClassifier(n_estimators=10,
+    # learning_rate=0.005, max_depth=4, subsample=0.7, reg_lambda=10, random_state=42),
+    # "LightGBM": LGBMClassifier(n_estimators=1000, learning_rate=0.005, random_state=42),
+    "LightGBM": LGBMClassifier(n_estimators=500, learning_rate=0.05, max_depth=-1, num_leaves=31, subsample=0.8, colsample_bytree=0.8, random_state=42),
+    # "LightGBM": LGBMClassifier( n_estimators=500, learning_rate=0.005, max_depth=8, subsample=0.8, reg_lambda=10, min_child_samples=2, random_state=42),
     # "Extra Trees": ExtraTreesClassifier(n_estimators=100, random_state=42),
-    # "CatBoost": CatBoostClassifier(iterations=100, depth=6, learning_rate=0.1, verbose=0, random_state=42),
-    "CatBoost": CatBoostClassifier(iterations=500,  # More boosting rounds
-    learning_rate=0.03,  # Slow learning rate for better accuracy
-    depth=8,  # Deeper trees
-    l2_leaf_reg=3,  # Regularization
-    random_state=42,
-    verbose=0),
+    # "CatBoost": CatBoostClassifier(iterations=300, learning_rate=0.01, l2_leaf_reg=2, depth=8, verbose=0, random_state=42)
+    "CatBoost": CatBoostClassifier(iterations=100, depth=6, learning_rate=0.01, l2_leaf_reg=2, verbose=0, random_state=42), # AUC: 0.9135
+    # "CatBoost": CatBoostClassifier(iterations=500, depth=6, learning_rate=0.01, verbose=0, random_state=42), # the best so far
+    # "CatBoost": CatBoostClassifier(iterations=500, learning_rate=0.03, depth=8, l2_leaf_reg=3, random_state=42,  verbose=0),
+    # "CatBoost": CatBoostClassifier(iterations=10, learning_rate=0.005, depth=6, l2_leaf_reg=10, subsample=0.7, random_state=42, verbose=0),
     # "Gradient Boosting (GBM)": GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42),
-    "Gradient Boosting (GBM)": GradientBoostingClassifier( n_estimators=500,  # More trees
-    learning_rate=0.05,  # Slower learning rate
-    max_depth=5,  # Deeper trees for capturing patterns
-    subsample=0.8,  # Use only 80% of samples
-    random_state=42),
-    # "KNN": KNeighborsClassifier(n_neighbors=5, metric='minkowski', p=2),
-    # "KNN": KNeighborsClassifier(n_neighbors=10,  # More neighbors = smoother decision boundary
-    #     weights='distance',  # Closer points have more influence
-    #     metric='manhattan')  # Manhattan distance can improve performance in high dimensions)
+    "Gradient Boosting (GBM)": GradientBoostingClassifier(n_estimators=500, learning_rate=0.05, max_depth=5, subsample=0.8, random_state=42),
+    # "Neural Network": KerasClassifier(model=build_nn_model, input_dim=X_train.shape[1], epochs=50, batch_size=32, verbose=1),
+    "KNN": KNeighborsClassifier(n_neighbors=5, metric='minkowski', p=2),
+    # "KNN": KNeighborsClassifier(n_neighbors=10, weights='distance', metric='manhattan')
 }
 
 # Step 2: Train, evaluate, and plot ROC curves
 # Dictionary to store trained models and their performance
-trained_models = {}  # Store models in memory
+trained_models = {}  # Store models
 roc_results = {}  # Store ROC AUC results
 
 # Initialize Plotly ROC figure
@@ -1284,7 +1520,7 @@ for name, model in models.items():
     # Train the model
     model.fit(X_train_scaled, y_train)
 
-    # Store trained model in a dictionary (variable storage)
+    # Store trained model in a dictionary
     trained_models[name] = model
 
     # Predict probabilities for ROC curve
@@ -1310,16 +1546,16 @@ for name, model in models.items():
 
     # Print classification report for train and validation set
     print(f"\n{name} Training Classification Report:\n")
-    print(classification_report(y_train, y_train_pred))
+    print(classification_report(y_train, y_train_pred, digits=4))
 
     print(f"\n{name} Validation Classification Report:\n")
-    print(classification_report(y_validation, y_val_pred))
+    print(classification_report(y_validation, y_val_pred, digits=4))
 
     # Add ROC curve for validation set
     fig.add_trace(go.Scatter(
         x=fpr_val, y=tpr_val,
         mode='lines',
-        name=f"{name} (AUC = {roc_auc_val:.2f})"
+        name=f"{name} (AUC = {roc_auc_val:.4f})"
     ))
 
 # Add diagonal reference line
@@ -1344,15 +1580,22 @@ fig.update_layout(
 # Show ROC Curve
 fig.show()
 
-print("\nAll models trained and stored in variables successfully!")
-
-# Step 4: Evaluate on the Test Set
+# Step 3: Evaluate on the Test Set
+# Initialize figure for ROC Curves
+fig_roc = go.Figure()
 print("\nTest Set Evaluation:\n")
+
+# Dictionary to store confusion matrices for all models
+confusion_matrices = {}
+
 for name, model in models.items():
     print(f"Evaluating {name} on the Test Set...")
 
     # Predict probabilities for ROC curve
-    y_test_prob = model.predict_proba(X_test_scaled)[:, 1]
+    try:
+        y_test_prob = model.predict_proba(X_test_scaled)[:, 1]  # Probabilities
+    except AttributeError:  # For models like KerasClassifier that may not have `predict_proba`
+        y_test_prob = model.predict(X_test_scaled).flatten()
 
     # Predict labels for test set
     y_test_pred = model.predict(X_test_scaled)
@@ -1361,25 +1604,243 @@ for name, model in models.items():
     fpr, tpr, _ = roc_curve(y_test, y_test_prob)
     roc_auc = auc(fpr, tpr)
 
-    # Print classification report for test set
+    # Print classification report
     print(f"\n{name} Test Classification Report:\n")
-    print(classification_report(y_test, y_test_pred))
+    print(classification_report(y_test, y_test_pred, digits=4))
 
-    # Print AUC for test set
-    print(f"{name} Test AUC: {roc_auc:.2f}\n")
+    # Print AUC score
+    print(f"{name} Test AUC: {roc_auc:.4f}\n")
 
-# Step 5: Implementing Hyperparameter Tuning with GridSearchCV
+    # Add model ROC curve to Plotly figure
+    fig_roc.add_trace(go.Scatter(
+        x=fpr,
+        y=tpr,
+        mode='lines',
+        name=f"{name} (AUC = {roc_auc:.4f})"
+    ))
 
-from sklearn.model_selection import GridSearchCV
+    # Compute and store the confusion matrix
+    cm = confusion_matrix(y_test, y_test_pred)
+    confusion_matrices[name] = cm
 
-param_grid = {
-    'n_estimators': [100, 500, 1000],
-    'max_depth': [3, 6, 9],
-    'learning_rate': [0.01, 0.05, 0.1]
+# Add diagonal reference line (Random Guess) to ROC curve
+fig_roc.add_trace(go.Scatter(
+    x=[0, 1],
+    y=[0, 1],
+    mode='lines',
+    line=dict(dash='dash'),
+    name="Random Guess (AUC = 0.50)"
+))
+
+# Customize layout for ROC curve
+fig_roc.update_layout(
+    title="ROC Curve Comparison Across Models",
+    xaxis_title="False Positive Rate",
+    yaxis_title="True Positive Rate",
+    legend=dict(x=0.7, y=0.05),
+    width=900,
+    height=600
+)
+fig_roc.show()
+
+# Plot Confusion Matrices for Each Model
+for name, cm in confusion_matrices.items():
+        cm = cm[::-1]
+
+        # Create confusion matrix heatmap using Plotly
+        fig_cm = ff.create_annotated_heatmap(
+            z=cm,
+            x=['Not Overdue', 'Overdue'],  # ** Actual labels (X-axis)**
+            y=['Overdue', 'Not Overdue'],  # **Predicted labels (Y-axis)**
+            showscale=True
+        )
+
+        # Customize layout for confusion matrix
+        fig_cm.update_layout(
+            title=f"Confusion Matrix: {name}",
+            xaxis_title="Actual Label",
+            yaxis_title="Predicted Label"
+        )
+
+        # Show the interactive confusion matrix plot
+        fig_cm.show()
+
+# Step 4: Implementing Hyperparameter Tuning with GridSearchCV
+# Define the parameter grid for Decision Tree
+param_grid_dt = {
+    'max_depth': [3, 5, 10, None],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 5],
+    'criterion': ['gini', 'entropy']
 }
 
-grid_search = GridSearchCV(GradientBoostingClassifier(random_state=42), param_grid, cv=3, scoring='accuracy')
-grid_search.fit(X_train, y_train)
+# Initialize GridSearchCV with Decision Tree Classifier
+grid_search_dt = GridSearchCV(
+    DecisionTreeClassifier(random_state=42),
+    param_grid_dt,
+    cv=3,  # 3-fold cross-validation
+    scoring='accuracy',  # Optimize for accuracy
+#    n_jobs=-1,  # Use all CPU cores
+    verbose=1  # Show progress
+)
 
-print("Best Parameters:", grid_search.best_params_)
-print("Best Accuracy:", grid_search.best_score_)
+# Fit the grid search on training data
+grid_search_dt.fit(X_train_scaled, y_train)
+
+# Print best hyperparameters and best accuracy score
+print("Best Parameters for Decision Tree:", grid_search_dt.best_params_)
+print("Best Accuracy for Decision Tree:", grid_search_dt.best_score_)
+
+# Step 5. Feature Importance
+# Dictionary to store feature importance
+feature_importance_dict = {}
+
+# List of models that have `feature_importances_`
+tree_based_models = ["Decision Tree", "Random Forest", "LightGBM", "CatBoost", "Gradient Boosting (GBM)"]
+
+# Iterate through models
+for name, model in models.items():
+
+    if name in tree_based_models:
+        # Extract feature importance from tree-based models
+        importance = model.feature_importances_
+        feature_importance_dict[name] = pd.DataFrame({
+            "Feature": X_train.columns,
+            "Importance": importance
+        }).sort_values(by="Importance", ascending=False)
+
+    elif name == "Logistic Regression":
+        # Extract importance from coefficients (absolute values)
+        importance = abs(model.coef_[0])
+        feature_importance_dict[name] = pd.DataFrame({
+            "Feature": X_train.columns,
+            "Importance": importance
+        }).sort_values(by="Importance", ascending=False)
+
+
+# Visualize feature importance
+for model_name, df in feature_importance_dict.items():
+    # Take top 25 most important features
+    df_top = df.head(25)
+
+    # Sort the features in ascending order
+    df_top = df_top.sort_values(by='Importance', ascending=True)
+
+    # Plot
+    fig = px.bar(
+        df_top,
+        x="Importance",
+        y="Feature",
+        orientation='h',
+        title=f"Feature Importance - {model_name}",
+        labels={"Importance": "Importance Score", "Feature": "Features"},
+        color="Importance",
+        color_continuous_scale="viridis",
+        text="Importance"
+    )
+
+    # Format text to display with 4 decimal places
+    fig.update_traces(texttemplate='%{text:.4f}', textposition='outside')
+
+    # Show the plot
+    fig.show()
+
+# Decision Tree model - visualization
+
+def extract_tree_graph(tree, feature_names):
+    """
+    Extracts the tree structure for Plotly visualization.
+
+    Parameters:
+    - tree: Trained DecisionTreeClassifier.
+    - feature_names: List of feature names.
+
+    Returns:
+    - nodes, edges: Lists containing graph information for visualization.
+    """
+    tree_ = tree.tree_
+    nodes = []
+    edges = []
+
+    def recurse(node, parent, depth, x, y, offset):
+        """Recursive function to extract tree structure"""
+        samples = tree_.n_node_samples[node]  # Ensure 'samples' is always defined
+
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:
+            feature = feature_names[tree_.feature[node]]
+            threshold = tree_.threshold[node]
+            gini = tree_.impurity[node]
+            value = tree_.value[node][0]
+            class_label = np.argmax(value)
+
+            node_label = f"{feature} ≤ {threshold:.2f}<br>Samples: {samples}<br>Gini: {gini:.2f}<br>Class: {class_label}"
+            nodes.append(dict(id=node, label=node_label, x=x, y=y))
+
+            # Left child (True branch)
+            left_child = tree_.children_left[node]
+            edges.append(dict(from_node=node, to_node=left_child))
+            recurse(left_child, node, depth + 1, x - offset, y - 1, offset / 2)
+
+            # Right child (False branch)
+            right_child = tree_.children_right[node]
+            edges.append(dict(from_node=node, to_node=right_child))
+            recurse(right_child, node, depth + 1, x + offset, y - 1, offset / 2)
+        else:
+            value = tree_.value[node][0]
+            class_label = np.argmax(value)
+            node_label = f"Leaf<br>Samples: {samples}<br>Class: {class_label}"
+            nodes.append(dict(id=node, label=node_label, x=x, y=y))
+
+    recurse(0, None, 0, 0, 0, 4)
+    return nodes, edges
+
+
+# Extract tree structure
+decision_tree = models["Decision Tree"]
+feature_names = X_train.columns.tolist()
+nodes, edges = extract_tree_graph(decision_tree, feature_names)
+
+# Extract X, Y positions for plotting
+x_vals = [node["x"] for node in nodes]
+y_vals = [node["y"] for node in nodes]
+labels = [node["label"] for node in nodes]
+
+# Create scatter plot for tree nodes
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(
+    x=x_vals,
+    y=y_vals,
+    mode="markers+text",
+    marker=dict(size=30, color="lightblue", line=dict(color="black", width=2)),
+    text=labels,
+    textposition="middle center",
+    hoverinfo="text"
+))
+
+# Draw tree edges
+for edge in edges:
+    parent_node = next(node for node in nodes if node["id"] == edge["from_node"])
+    child_node = next(node for node in nodes if node["id"] == edge["to_node"])
+
+    fig.add_trace(go.Scatter(
+        x=[parent_node["x"], child_node["x"]],
+        y=[parent_node["y"], child_node["y"]],
+        mode="lines",
+        line=dict(color="black", width=1),
+        hoverinfo="skip"
+    ))
+
+# Update layout
+fig.update_layout(
+    title="Decision Tree Visualization",
+    showlegend=False,
+    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+    height=800,
+    width=1000
+)
+
+fig.show()
+
+
